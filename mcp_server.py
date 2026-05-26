@@ -17,6 +17,17 @@ manager = GCSLeadsManager(credentials_path=SERVICE_ACCOUNT_PATH)
 mcp = FastMCP("context_centre", log_level="ERROR")
 
 
+def _get_mcp_transport_settings() -> dict:
+    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+    if transport == "http":
+        return {
+            "transport": "http",
+            "host": os.getenv("MCP_HOST", "0.0.0.0"),
+            "port": int(os.getenv("MCP_PORT", "8000")),
+        }
+    return {"transport": "stdio"}
+
+
 def _load_lead_file(lead_id: str, filename: str) -> str:
     return manager.fetch_file_content(lead_id, filename)
 

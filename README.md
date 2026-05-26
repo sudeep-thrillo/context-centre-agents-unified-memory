@@ -56,6 +56,27 @@ docker compose up -d --build
 docker compose logs -f context_centre_mcp
 ```
 
+## Connecting Claude Code to the MCP server
+
+The MCP server now supports HTTP transport on port `8000`.
+
+- In Docker Compose, the service is exposed on `http://localhost:8000`.
+- On a remote VM, use `http://<vm-hostname-or-ip>:8000`.
+
+If Claude Code supports a remote MCP endpoint, configure it to point at:
+
+```text
+http://<host>:8000
+```
+
+If Claude Code uses a specific tool registration, register the MCP tool endpoint and ensure the container host is reachable from Claude Code.
+
+If you are running Claude Code locally, use:
+
+```text
+http://localhost:8000
+```
+
 ## Docker Compose
 
 The repository includes `docker-compose.yml` for production-ready deployment. The service mounts the service account secret into the container at `/run/secrets/google-credentials.json`.
