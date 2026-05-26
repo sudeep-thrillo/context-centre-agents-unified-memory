@@ -15,4 +15,4 @@ services:
       - 8000:8000
     volumes:
       - ${GCS_SERVICE_ACCOUNT_PATH}:/run/secrets/google-credentials.json:ro
-    command: uv run mcp dev mcp_server.py
+    command: python3 mcp_server.py

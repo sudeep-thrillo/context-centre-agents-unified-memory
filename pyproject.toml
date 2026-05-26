@@ -6,9 +6,8 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "fastmcp>=3.3.1",
-    "mcp[cli]>=1.27.1",
+    "mcp>=1.27.1",
     "google-cloud-storage>=2.10.0",
-    "uv"
 ]
 
 [tool.setuptools]
