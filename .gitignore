@@ -1,0 +1,19 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.DS_Store
+.env
+.env.*
+*.log
+uv.lock
+data-platform-*.json
+
+# Docker artifacts
+.dockerignore
+
+# Optional editor files
+*.swp
+*.swo
