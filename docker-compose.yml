@@ -8,6 +8,7 @@ services:
     environment:
       - GCS_SERVICE_ACCOUNT_PATH=/run/secrets/google-credentials.json
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google-credentials.json
+      - FIRESTORE_DOCUMENTS_COLLECTION=dev_documents
       - MCP_TRANSPORT=http
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8000
