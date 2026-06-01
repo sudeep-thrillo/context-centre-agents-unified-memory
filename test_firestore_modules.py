@@ -502,7 +502,7 @@ class TestMCPToolRegistration(unittest.TestCase):
         tool = self._get_tool("get_leads_list")
         props = tool.parameters.get("properties", {})
         self.assertEqual(props["limit"]["minimum"], 1)
-        self.assertEqual(props["limit"]["maximum"], 500)
+        self.assertEqual(props["limit"]["maximum"], 100)
 
     def test_get_leads_list_filters_is_optional(self):
         tool = self._get_tool("get_leads_list")

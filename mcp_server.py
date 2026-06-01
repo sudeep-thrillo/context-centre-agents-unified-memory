@@ -321,9 +321,9 @@ def get_leads_list(
     ),
     limit: int = Field(
         default=10,
-        description="Maximum number of leads to return. Defaults to 10.",
+        description="Maximum number of leads to return. Defaults to 10, max 100.",
         ge=1,
-        le=500,
+        le=100,
     ),
 ) -> list[dict]:
     fs_filters = None
