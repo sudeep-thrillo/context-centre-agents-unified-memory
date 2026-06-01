@@ -1,10 +1,44 @@
-from pydantic import Field
+from pydantic import BaseModel, Field
 from mcp.server.fastmcp import FastMCP
-from firestore_modules import FirestoreLeadsManager
+from firestore_modules import FirestoreLeadsManager, FilterCondition as FSFilterCondition
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Optional
 import os
 import re
+
+class FilterCondition(BaseModel):
+    field: str = Field(
+        description=(
+            "Snapshot field to filter on. "
+            "Lead fields: current_lead_state, current_lead_stage, planned_region, lead_level, "
+            "booking_time_preference, dot_preference, date_of_journey, number_of_adults, "
+            "departure_city, traveller_type, special_occasion, tags_v2, utm_source, utm_medium, "
+            "lead_campaign, enquiry_source, enquiry_section_source, required_services, "
+            "number_of_infants, number_of_senior_citizens, ticket_status, "
+            "lead_creation_time, lead_assignment_time, trip_duration_preference, budget_per_person. "
+            "Score fields: booking_urgency_score, customer_travel_intent_score, "
+            "competition_signals_score, customer_persona_score, seller_evaluation_score, "
+            "thrillophilia_affinity_score, product_intelligence_score."
+        )
+    )
+    op: str = Field(
+        description=(
+            "Filter operator. Supported: == (equality), != (not equal), "
+            "> / >= / < / <= (numeric/string comparison), "
+            "in (value is a list, field must match one element), "
+            "not-in (field must not match any element in the list), "
+            "array_contains (field is an array containing the value)."
+        )
+    )
+    value: Any = Field(
+        description=(
+            "Filter value. Use a Python list for 'in' and 'not-in' operators. "
+            "For scores use numeric values (e.g. 7.0). "
+            "For date_of_journey use ISO date strings (e.g. '2026-07-01')."
+        )
+    )
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -123,21 +157,6 @@ def get_lead_data(
     return _load_lead_file(lead_id, "lead.md")
 
 
-@mcp.tool(
-    name="get_customer_details",
-    description=(
-        "Returns the customer/enquirer profile record, including contact identifiers and personal "
-        "details that are stored separately from the trip and booking data. "
-        "Use when you need customer profile fields that are not covered by the lead record. "
-        "If this document is unavailable for a lead, contact details can be found in "
-        "get_lead_manifest (Quick Snapshot table) or get_lead_data."
-    ),
-)
-def get_customer_details(
-    lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
-) -> str:
-    return _load_lead_file(lead_id, "customer.md")
-
 
 @mcp.tool(
     name="get_lead_scores",
@@ -243,7 +262,7 @@ def get_post_lead_events(
     name="get_lead_complete_details",
     description=(
         "Fetches ALL lead documents concurrently and returns them as a structured dict with keys: "
-        "manifest, lead_data, customer_details, scores, conversations, quotations, "
+        "manifest, lead_data, scores, conversations, quotations, "
         "pre_lead_events, post_lead_events. "
         "Keys whose Firestore document does not yet exist for this lead are null. "
         "Use only when a full multi-dimensional view is needed and latency is acceptable "
@@ -257,7 +276,6 @@ def get_lead_complete_details(
     files = {
         "manifest": "manifest.md",
         "lead_data": "lead.md",
-        "customer_details": "customer.md",
         "scores": "scoring.md",
         "conversations": "conversations.md",
         "quotations": "quotations.md",
@@ -282,14 +300,36 @@ def get_lead_complete_details(
 @mcp.tool(
     name="get_leads_list",
     description=(
-        "Returns a sorted list of all lead IDs in the active Firestore collection "
-        "(e.g. ['ENQ1133874342', 'ENQ5466305225', ...]). "
-        "Use only for lead discovery when you do not already have a lead_id from context. "
-        "Note: streams all document references — may be slow on very large collections."
+        "Discover leads with optional Firestore-level filtering. Returns each matched lead with "
+        "lead_snapshot (all raw lead fields) and score_snapshot (all 7 scoring dimensions) "
+        "so you can triage without making additional tool calls. "
+        "Default limit is 10 leads. "
+        "Filters are applied at the database level — lead fields and score fields are each "
+        "queried in their respective Firestore documents and the results intersected. "
+        "Example queries: "
+        "• High-urgency open leads: filters=[{field:'booking_urgency_score',op:'>=',value:7},{field:'current_lead_state',op:'==',value:'open'}] "
+        "• High-intent Europe leads: filters=[{field:'customer_travel_intent_score',op:'>=',value:8},{field:'planned_region',op:'==',value:'Europe Tours'}] "
+        "• High-value tag: filters=[{field:'tags_v2',op:'array_contains',value:'high_value'}] "
+        "• Multiple regions: filters=[{field:'planned_region',op:'in',value:['Ladakh Tours','Europe Tours']}] "
+        "Use get_lead_manifest / get_lead_data / get_lead_scores for deeper per-lead detail."
     ),
 )
-def get_leads_list() -> list[str]:
-    return manager.fetch_all_leads()
+def get_leads_list(
+    filters: Optional[list[FilterCondition]] = Field(
+        default=None,
+        description="Optional list of filter conditions applied at the Firestore level.",
+    ),
+    limit: int = Field(
+        default=10,
+        description="Maximum number of leads to return. Defaults to 10.",
+        ge=1,
+        le=500,
+    ),
+) -> list[dict]:
+    fs_filters = None
+    if filters:
+        fs_filters = [FSFilterCondition(field=f.field, op=f.op, value=f.value) for f in filters]
+    return manager.fetch_leads_with_meta(filters=fs_filters, limit=limit)
 
 
 if __name__ == "__main__":
