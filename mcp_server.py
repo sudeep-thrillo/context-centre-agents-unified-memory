@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 import os
 import re
+import time
+from logger import emit_log
 
 class FilterCondition(BaseModel):
     field: str = Field(
@@ -107,6 +109,15 @@ def _load_lead_file(lead_id: str, filename: str) -> str:
     document_name = _normalize_document_name(filename)
     return manager.fetch_lead_document(lead_id, document_name)
 
+_COMPLETE_KEY_TO_DOC = {
+    "manifest":        "manifest",
+    "lead_data":       "lead",
+    "scores":          "scoring",
+    "conversations":   "conversations",
+    "quotations":      "quotations",
+    "pre_lead_events": "events_pre_lead",
+    "post_lead_events": "events_post_lead",
+}
 
 # ---------------------------------------------------------------------------
 # Tools — ordered from broadest (start here) to most specific
@@ -133,7 +144,22 @@ def _load_lead_file(lead_id: str, filename: str) -> str:
 def get_lead_manifest(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
-    return _load_lead_file(lead_id, "manifest.md")
+    t0 = time.monotonic()
+    status, error_type, error_message, docs_found = "success", None, None, []
+    try:
+        result = _load_lead_file(lead_id, "manifest.md")
+        docs_found = ["manifest"]
+        return result
+    except FileNotFoundError as e:
+        status, error_type, error_message = "error", "FileNotFoundError", str(e)
+        raise
+    except Exception as e:
+        status, error_type, error_message = "error", type(e).__name__, str(e)
+        raise
+    finally:
+        emit_log("get_lead_manifest", int((time.monotonic() - t0) * 1000),
+                 status, lead_id=lead_id, docs_found=docs_found,
+                 error_type=error_type, error_message=error_message)
 
 
 @mcp.tool(
@@ -154,8 +180,22 @@ def get_lead_manifest(
 def get_lead_data(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
-    return _load_lead_file(lead_id, "lead.md")
-
+    t0 = time.monotonic()
+    status, error_type, error_message, docs_found = "success", None, None, []
+    try:
+        result = _load_lead_file(lead_id, "lead.md")
+        docs_found = ["lead"]
+        return result
+    except FileNotFoundError as e:
+        status, error_type, error_message = "error", "FileNotFoundError", str(e)
+        raise
+    except Exception as e:
+        status, error_type, error_message = "error", type(e).__name__, str(e)
+        raise
+    finally:
+        emit_log("get_lead_data", int((time.monotonic() - t0) * 1000),
+                 status, lead_id=lead_id, docs_found=docs_found,
+                 error_type=error_type, error_message=error_message)
 
 
 @mcp.tool(
@@ -177,7 +217,23 @@ def get_lead_data(
 def get_lead_scores(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
-    return _load_lead_file(lead_id, "scoring.md")
+    t0 = time.monotonic()
+    status, error_type, error_message, docs_found = "success", None, None, []
+    try:
+        result = _load_lead_file(lead_id, "scoring.md")
+        docs_found = ["scoring"]
+        return result
+    except FileNotFoundError as e:
+        status, error_type, error_message = "error", "FileNotFoundError", str(e)
+        raise
+    except Exception as e:
+        status, error_type, error_message = "error", type(e).__name__, str(e)
+        raise
+    finally:
+        emit_log("get_lead_scores", int((time.monotonic() - t0) * 1000),
+                 status, lead_id=lead_id, docs_found=docs_found,
+                 composite_score_available=bool(docs_found),
+                 error_type=error_type, error_message=error_message)
 
 
 @mcp.tool(
@@ -198,7 +254,22 @@ def get_lead_scores(
 def get_conversations(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
-    return _load_lead_file(lead_id, "conversations.md")
+    t0 = time.monotonic()
+    status, error_type, error_message, docs_found = "success", None, None, []
+    try:
+        result = _load_lead_file(lead_id, "conversations.md")
+        docs_found = ["conversations"]
+        return result
+    except FileNotFoundError as e:
+        status, error_type, error_message = "error", "FileNotFoundError", str(e)
+        raise
+    except Exception as e:
+        status, error_type, error_message = "error", type(e).__name__, str(e)
+        raise
+    finally:
+        emit_log("get_conversations", int((time.monotonic() - t0) * 1000),
+                 status, lead_id=lead_id, docs_found=docs_found,
+                 error_type=error_type, error_message=error_message)
 
 
 @mcp.tool(
@@ -223,7 +294,22 @@ def get_conversations(
 def get_quotation_information(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
-    return _load_lead_file(lead_id, "quotations.md")
+    t0 = time.monotonic()
+    status, error_type, error_message, docs_found = "success", None, None, []
+    try:
+        result = _load_lead_file(lead_id, "quotations.md")
+        docs_found = ["quotations"]
+        return result
+    except FileNotFoundError as e:
+        status, error_type, error_message = "error", "FileNotFoundError", str(e)
+        raise
+    except Exception as e:
+        status, error_type, error_message = "error", type(e).__name__, str(e)
+        raise
+    finally:
+        emit_log("get_quotation_information", int((time.monotonic() - t0) * 1000),
+                 status, lead_id=lead_id, docs_found=docs_found,
+                 error_type=error_type, error_message=error_message)
 
 
 @mcp.tool(
@@ -239,7 +325,22 @@ def get_quotation_information(
 def get_pre_lead_events(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
-    return _load_lead_file(lead_id, "events_pre_lead.md")
+    t0 = time.monotonic()
+    status, error_type, error_message, docs_found = "success", None, None, []
+    try:
+        result = _load_lead_file(lead_id, "events_pre_lead.md")
+        docs_found = ["events_pre_lead"]
+        return result
+    except FileNotFoundError as e:
+        status, error_type, error_message = "error", "FileNotFoundError", str(e)
+        raise
+    except Exception as e:
+        status, error_type, error_message = "error", type(e).__name__, str(e)
+        raise
+    finally:
+        emit_log("get_pre_lead_events", int((time.monotonic() - t0) * 1000),
+                 status, lead_id=lead_id, docs_found=docs_found,
+                 error_type=error_type, error_message=error_message)
 
 
 @mcp.tool(
@@ -255,7 +356,22 @@ def get_pre_lead_events(
 def get_post_lead_events(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
-    return _load_lead_file(lead_id, "events_post_lead.md")
+    t0 = time.monotonic()
+    status, error_type, error_message, docs_found = "success", None, None, []
+    try:
+        result = _load_lead_file(lead_id, "events_post_lead.md")
+        docs_found = ["events_post_lead"]
+        return result
+    except FileNotFoundError as e:
+        status, error_type, error_message = "error", "FileNotFoundError", str(e)
+        raise
+    except Exception as e:
+        status, error_type, error_message = "error", type(e).__name__, str(e)
+        raise
+    finally:
+        emit_log("get_post_lead_events", int((time.monotonic() - t0) * 1000),
+                 status, lead_id=lead_id, docs_found=docs_found,
+                 error_type=error_type, error_message=error_message)
 
 
 @mcp.tool(
@@ -273,28 +389,59 @@ def get_post_lead_events(
 def get_lead_complete_details(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> dict:
-    files = {
-        "manifest": "manifest.md",
-        "lead_data": "lead.md",
-        "scores": "scoring.md",
-        "conversations": "conversations.md",
-        "quotations": "quotations.md",
-        "pre_lead_events": "events_pre_lead.md",
-        "post_lead_events": "events_post_lead.md",
-    }
+    t0 = time.monotonic()
+    status, error_type, error_message = "success", None, None
     result: dict = {}
-    with ThreadPoolExecutor(max_workers=len(files)) as executor:
-        future_to_key = {
-            executor.submit(_load_lead_file, lead_id, filename): key
-            for key, filename in files.items()
+    try:
+        files = {
+            "manifest": "manifest.md",
+            "lead_data": "lead.md",
+            "scores": "scoring.md",
+            "conversations": "conversations.md",
+            "quotations": "quotations.md",
+            "pre_lead_events": "events_pre_lead.md",
+            "post_lead_events": "events_post_lead.md",
         }
-        for future in as_completed(future_to_key):
-            key = future_to_key[future]
-            try:
-                result[key] = future.result()
-            except FileNotFoundError:
-                result[key] = None
-    return result
+        with ThreadPoolExecutor(max_workers=len(files)) as executor:
+            future_to_key = {
+                executor.submit(_load_lead_file, lead_id, filename): key
+                for key, filename in files.items()
+            }
+            for future in as_completed(future_to_key):
+                key = future_to_key[future]
+                try:
+                    result[key] = future.result()
+                except FileNotFoundError:
+                    result[key] = None
+        docs_found = [
+            _COMPLETE_KEY_TO_DOC[k] for k, v in result.items() if v is not None
+        ]
+        found_count = len(docs_found)
+        if found_count == 0:
+            status = "error"
+        elif found_count < len(files):
+            status = "partial"
+        emit_log(
+            "get_lead_complete_details",
+            int((time.monotonic() - t0) * 1000),
+            status,
+            lead_id=lead_id,
+            docs_found=docs_found,
+            error_type=error_type,
+            error_message=error_message,
+        )
+        return result
+    except Exception as e:
+        status, error_type, error_message = "error", type(e).__name__, str(e)
+        emit_log(
+            "get_lead_complete_details",
+            int((time.monotonic() - t0) * 1000),
+            status,
+            lead_id=lead_id,
+            error_type=error_type,
+            error_message=error_message,
+        )
+        raise
 
 
 @mcp.tool(
@@ -326,10 +473,20 @@ def get_leads_list(
         le=100,
     ),
 ) -> list[dict]:
-    fs_filters = None
-    if filters:
-        fs_filters = [FSFilterCondition(field=f.field, op=f.op, value=f.value) for f in filters]
-    return manager.fetch_leads_with_meta(filters=fs_filters, limit=limit)
+    t0 = time.monotonic()
+    status, error_type, error_message = "success", None, None
+    try:
+        fs_filters = None
+        if filters:
+            fs_filters = [FSFilterCondition(field=f.field, op=f.op, value=f.value) for f in filters]
+        result = manager.fetch_leads_with_meta(filters=fs_filters, limit=limit)
+        return result
+    except Exception as e:
+        status, error_type, error_message = "error", type(e).__name__, str(e)
+        raise
+    finally:
+        emit_log("get_leads_list", int((time.monotonic() - t0) * 1000),
+                 status, error_type=error_type, error_message=error_message)
 
 
 if __name__ == "__main__":
