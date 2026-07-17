@@ -7,6 +7,7 @@ from typing import Any, Optional
 import os
 import re
 import time
+import anyio
 from logger import emit_log
 
 class FilterCondition(BaseModel):
@@ -61,6 +62,18 @@ COLLECTION_ROOT = os.getenv("FIRESTORE_DOCUMENTS_COLLECTION", "dev_documents")
 DATABASE_ID = os.getenv("FIRESTORE_DATABASE_ID", "(default)")
 MCP_HOST = os.getenv("MCP_HOST", "0.0.0.0")
 MCP_PORT = int(os.getenv("MCP_PORT", os.getenv("PORT", "8000")))
+
+# ---------------------------------------------------------------------------
+# Concurrency
+# The MCP SDK calls sync tool handlers directly on the event loop
+# (func_metadata.py: `return fn(...)`), so a single blocking Firestore read
+# would freeze the whole uvicorn worker. We offload every blocking read to a
+# bounded worker-thread pool so one instance can serve many calls concurrently.
+# The limiter caps concurrent threads (sized to Cloud Run containerConcurrency;
+# env-overridable for load testing).
+# ---------------------------------------------------------------------------
+_FS_CONCURRENCY = int(os.getenv("MCP_FS_CONCURRENCY", "40"))
+_FS_LIMITER = anyio.CapacityLimiter(_FS_CONCURRENCY)
 
 manager = FirestoreLeadsManager(
     credentials_path=SERVICE_ACCOUNT_PATH,
@@ -119,6 +132,43 @@ _COMPLETE_KEY_TO_DOC = {
     "post_lead_events": "events_post_lead",
 }
 
+_COMPLETE_FILES = {
+    "manifest": "manifest.md",
+    "lead_data": "lead.md",
+    "scores": "scoring.md",
+    "conversations": "conversations.md",
+    "quotations": "quotations.md",
+    "pre_lead_events": "events_pre_lead.md",
+    "post_lead_events": "events_post_lead.md",
+}
+
+
+def _complete_details_sync(lead_id: str) -> tuple[dict, str, list]:
+    """Blocking fan-out fetch of all lead documents. Runs in a worker thread
+    (via anyio.to_thread) so the event loop stays free; internally parallelises
+    the individual Firestore reads. Returns (result, status, docs_found)."""
+    result: dict = {}
+    with ThreadPoolExecutor(max_workers=len(_COMPLETE_FILES)) as executor:
+        future_to_key = {
+            executor.submit(_load_lead_file, lead_id, filename): key
+            for key, filename in _COMPLETE_FILES.items()
+        }
+        for future in as_completed(future_to_key):
+            key = future_to_key[future]
+            try:
+                result[key] = future.result()
+            except FileNotFoundError:
+                result[key] = None
+
+    docs_found = [_COMPLETE_KEY_TO_DOC[k] for k, v in result.items() if v is not None]
+    found_count = len(docs_found)
+    status = "success"
+    if found_count == 0:
+        status = "error"
+    elif found_count < len(_COMPLETE_FILES):
+        status = "partial"
+    return result, status, docs_found
+
 # ---------------------------------------------------------------------------
 # Tools — ordered from broadest (start here) to most specific
 # ---------------------------------------------------------------------------
@@ -141,13 +191,15 @@ _COMPLETE_KEY_TO_DOC = {
         "with the raw-data tools before taking any action."
     ),
 )
-def get_lead_manifest(
+async def get_lead_manifest(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = _load_lead_file(lead_id, "manifest.md")
+        result = await anyio.to_thread.run_sync(
+            _load_lead_file, lead_id, "manifest.md", limiter=_FS_LIMITER
+        )
         docs_found = ["manifest"]
         return result
     except FileNotFoundError as e:
@@ -177,13 +229,15 @@ def get_lead_manifest(
         "or the structured intent signal analysis — rather than the synthesised view in get_lead_manifest."
     ),
 )
-def get_lead_data(
+async def get_lead_data(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = _load_lead_file(lead_id, "lead.md")
+        result = await anyio.to_thread.run_sync(
+            _load_lead_file, lead_id, "lead.md", limiter=_FS_LIMITER
+        )
         docs_found = ["lead"]
         return result
     except FileNotFoundError as e:
@@ -214,13 +268,15 @@ def get_lead_data(
         "it contains calibrated guidance derived directly from the scoring rationale."
     ),
 )
-def get_lead_scores(
+async def get_lead_scores(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = _load_lead_file(lead_id, "scoring.md")
+        result = await anyio.to_thread.run_sync(
+            _load_lead_file, lead_id, "scoring.md", limiter=_FS_LIMITER
+        )
         docs_found = ["scoring"]
         return result
     except FileNotFoundError as e:
@@ -251,13 +307,15 @@ def get_lead_scores(
         "commitments made, objections raised, and whose turn it is to respond."
     ),
 )
-def get_conversations(
+async def get_conversations(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = _load_lead_file(lead_id, "conversations.md")
+        result = await anyio.to_thread.run_sync(
+            _load_lead_file, lead_id, "conversations.md", limiter=_FS_LIMITER
+        )
         docs_found = ["conversations"]
         return result
     except FileNotFoundError as e:
@@ -291,13 +349,15 @@ def get_conversations(
         "A high-level quote status is also visible in get_lead_manifest when this document exists."
     ),
 )
-def get_quotation_information(
+async def get_quotation_information(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = _load_lead_file(lead_id, "quotations.md")
+        result = await anyio.to_thread.run_sync(
+            _load_lead_file, lead_id, "quotations.md", limiter=_FS_LIMITER
+        )
         docs_found = ["quotations"]
         return result
     except FileNotFoundError as e:
@@ -322,13 +382,15 @@ def get_quotation_information(
         "they explored, and what prompted them to submit the enquiry."
     ),
 )
-def get_pre_lead_events(
+async def get_pre_lead_events(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = _load_lead_file(lead_id, "events_pre_lead.md")
+        result = await anyio.to_thread.run_sync(
+            _load_lead_file, lead_id, "events_pre_lead.md", limiter=_FS_LIMITER
+        )
         docs_found = ["events_pre_lead"]
         return result
     except FileNotFoundError as e:
@@ -353,13 +415,15 @@ def get_pre_lead_events(
         "or understand how and when the lead progressed through the sales pipeline."
     ),
 )
-def get_post_lead_events(
+async def get_post_lead_events(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> str:
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = _load_lead_file(lead_id, "events_post_lead.md")
+        result = await anyio.to_thread.run_sync(
+            _load_lead_file, lead_id, "events_post_lead.md", limiter=_FS_LIMITER
+        )
         docs_found = ["events_post_lead"]
         return result
     except FileNotFoundError as e:
@@ -386,60 +450,30 @@ def get_post_lead_events(
         "For targeted single-dimension queries, use the individual tools — they are faster and cheaper."
     ),
 )
-def get_lead_complete_details(
+async def get_lead_complete_details(
     lead_id: str = Field(description="Lead ID, for example ENQ1133874342"),
 ) -> dict:
     t0 = time.monotonic()
-    status, error_type, error_message = "success", None, None
-    result: dict = {}
     try:
-        files = {
-            "manifest": "manifest.md",
-            "lead_data": "lead.md",
-            "scores": "scoring.md",
-            "conversations": "conversations.md",
-            "quotations": "quotations.md",
-            "pre_lead_events": "events_pre_lead.md",
-            "post_lead_events": "events_post_lead.md",
-        }
-        with ThreadPoolExecutor(max_workers=len(files)) as executor:
-            future_to_key = {
-                executor.submit(_load_lead_file, lead_id, filename): key
-                for key, filename in files.items()
-            }
-            for future in as_completed(future_to_key):
-                key = future_to_key[future]
-                try:
-                    result[key] = future.result()
-                except FileNotFoundError:
-                    result[key] = None
-        docs_found = [
-            _COMPLETE_KEY_TO_DOC[k] for k, v in result.items() if v is not None
-        ]
-        found_count = len(docs_found)
-        if found_count == 0:
-            status = "error"
-        elif found_count < len(files):
-            status = "partial"
+        result, status, docs_found = await anyio.to_thread.run_sync(
+            _complete_details_sync, lead_id, limiter=_FS_LIMITER
+        )
         emit_log(
             "get_lead_complete_details",
             int((time.monotonic() - t0) * 1000),
             status,
             lead_id=lead_id,
             docs_found=docs_found,
-            error_type=error_type,
-            error_message=error_message,
         )
         return result
     except Exception as e:
-        status, error_type, error_message = "error", type(e).__name__, str(e)
         emit_log(
             "get_lead_complete_details",
             int((time.monotonic() - t0) * 1000),
-            status,
+            "error",
             lead_id=lead_id,
-            error_type=error_type,
-            error_message=error_message,
+            error_type=type(e).__name__,
+            error_message=str(e),
         )
         raise
 
@@ -461,7 +495,7 @@ def get_lead_complete_details(
         "Use get_lead_manifest / get_lead_data / get_lead_scores for deeper per-lead detail."
     ),
 )
-def get_leads_list(
+async def get_leads_list(
     filters: Optional[list[FilterCondition]] = Field(
         default=None,
         description="Optional list of filter conditions applied at the Firestore level.",
@@ -479,7 +513,10 @@ def get_leads_list(
         fs_filters = None
         if filters:
             fs_filters = [FSFilterCondition(field=f.field, op=f.op, value=f.value) for f in filters]
-        result = manager.fetch_leads_with_meta(filters=fs_filters, limit=limit)
+        result = await anyio.to_thread.run_sync(
+            lambda: manager.fetch_leads_with_meta(filters=fs_filters, limit=limit),
+            limiter=_FS_LIMITER,
+        )
         return result
     except Exception as e:
         status, error_type, error_message = "error", type(e).__name__, str(e)
