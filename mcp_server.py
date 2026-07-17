@@ -74,6 +74,36 @@ MCP_PORT = int(os.getenv("MCP_PORT", os.getenv("PORT", "8000")))
 # ---------------------------------------------------------------------------
 _FS_CONCURRENCY = int(os.getenv("MCP_FS_CONCURRENCY", "40"))
 _FS_LIMITER = anyio.CapacityLimiter(_FS_CONCURRENCY)
+# Max seconds to wait for a free worker slot before failing fast, so calls don't
+# queue until the Cloud Run request timeout (300s) and produce truncated responses.
+_FS_ACQUIRE_TIMEOUT = float(os.getenv("MCP_FS_ACQUIRE_TIMEOUT", "20"))
+_thread_limiter_synced = False
+
+
+async def _offload(fn, *args):
+    """Run a blocking callable in a worker thread, bounded by _FS_LIMITER.
+
+    Only the wait for a free slot is time-bounded: if none frees within
+    _FS_ACQUIRE_TIMEOUT the call raises TimeoutError (fail fast) instead of
+    hanging to the request timeout. A call that has acquired a slot runs to
+    completion.
+    """
+    global _thread_limiter_synced
+    if not _thread_limiter_synced:
+        # Keep the shared worker-thread pool at least as large as our limiter so
+        # acquiring an _FS_LIMITER slot is never re-throttled inside run_sync.
+        anyio.to_thread.current_default_thread_limiter().total_tokens = max(
+            _FS_CONCURRENCY, 40
+        )
+        _thread_limiter_synced = True
+
+    with anyio.fail_after(_FS_ACQUIRE_TIMEOUT):
+        await _FS_LIMITER.acquire()
+    try:
+        return await anyio.to_thread.run_sync(fn, *args)
+    finally:
+        _FS_LIMITER.release()
+
 
 manager = FirestoreLeadsManager(
     credentials_path=SERVICE_ACCOUNT_PATH,
@@ -197,9 +227,7 @@ async def get_lead_manifest(
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = await anyio.to_thread.run_sync(
-            _load_lead_file, lead_id, "manifest.md", limiter=_FS_LIMITER
-        )
+        result = await _offload(_load_lead_file, lead_id, "manifest.md")
         docs_found = ["manifest"]
         return result
     except FileNotFoundError as e:
@@ -235,9 +263,7 @@ async def get_lead_data(
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = await anyio.to_thread.run_sync(
-            _load_lead_file, lead_id, "lead.md", limiter=_FS_LIMITER
-        )
+        result = await _offload(_load_lead_file, lead_id, "lead.md")
         docs_found = ["lead"]
         return result
     except FileNotFoundError as e:
@@ -274,9 +300,7 @@ async def get_lead_scores(
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = await anyio.to_thread.run_sync(
-            _load_lead_file, lead_id, "scoring.md", limiter=_FS_LIMITER
-        )
+        result = await _offload(_load_lead_file, lead_id, "scoring.md")
         docs_found = ["scoring"]
         return result
     except FileNotFoundError as e:
@@ -313,9 +337,7 @@ async def get_conversations(
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = await anyio.to_thread.run_sync(
-            _load_lead_file, lead_id, "conversations.md", limiter=_FS_LIMITER
-        )
+        result = await _offload(_load_lead_file, lead_id, "conversations.md")
         docs_found = ["conversations"]
         return result
     except FileNotFoundError as e:
@@ -355,9 +377,7 @@ async def get_quotation_information(
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = await anyio.to_thread.run_sync(
-            _load_lead_file, lead_id, "quotations.md", limiter=_FS_LIMITER
-        )
+        result = await _offload(_load_lead_file, lead_id, "quotations.md")
         docs_found = ["quotations"]
         return result
     except FileNotFoundError as e:
@@ -388,9 +408,7 @@ async def get_pre_lead_events(
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = await anyio.to_thread.run_sync(
-            _load_lead_file, lead_id, "events_pre_lead.md", limiter=_FS_LIMITER
-        )
+        result = await _offload(_load_lead_file, lead_id, "events_pre_lead.md")
         docs_found = ["events_pre_lead"]
         return result
     except FileNotFoundError as e:
@@ -421,9 +439,7 @@ async def get_post_lead_events(
     t0 = time.monotonic()
     status, error_type, error_message, docs_found = "success", None, None, []
     try:
-        result = await anyio.to_thread.run_sync(
-            _load_lead_file, lead_id, "events_post_lead.md", limiter=_FS_LIMITER
-        )
+        result = await _offload(_load_lead_file, lead_id, "events_post_lead.md")
         docs_found = ["events_post_lead"]
         return result
     except FileNotFoundError as e:
@@ -455,9 +471,7 @@ async def get_lead_complete_details(
 ) -> dict:
     t0 = time.monotonic()
     try:
-        result, status, docs_found = await anyio.to_thread.run_sync(
-            _complete_details_sync, lead_id, limiter=_FS_LIMITER
-        )
+        result, status, docs_found = await _offload(_complete_details_sync, lead_id)
         emit_log(
             "get_lead_complete_details",
             int((time.monotonic() - t0) * 1000),
@@ -513,9 +527,8 @@ async def get_leads_list(
         fs_filters = None
         if filters:
             fs_filters = [FSFilterCondition(field=f.field, op=f.op, value=f.value) for f in filters]
-        result = await anyio.to_thread.run_sync(
-            lambda: manager.fetch_leads_with_meta(filters=fs_filters, limit=limit),
-            limiter=_FS_LIMITER,
+        result = await _offload(
+            lambda: manager.fetch_leads_with_meta(filters=fs_filters, limit=limit)
         )
         return result
     except Exception as e:
