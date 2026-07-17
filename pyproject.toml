@@ -9,6 +9,7 @@ dependencies = [
     "mcp>=1.27.1",
     "google-cloud-firestore>=2.16.0",
     "uvicorn>=0.22.0",
+    "anyio>=4.0.0",
 ]
 
 [tool.setuptools]

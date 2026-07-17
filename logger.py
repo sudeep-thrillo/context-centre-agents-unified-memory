@@ -1,7 +1,12 @@
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+
+# Default caller attribution for request logs. Set MCP_DEFAULT_CALLER on the
+# deployment (e.g. "sales-copilot") so load can be attributed per consumer.
+_DEFAULT_CALLER = os.getenv("MCP_DEFAULT_CALLER", "unknown")
 
 # Canonical Firestore document names (not result-key aliases)
 TOOL_DOCS_MAP = {
@@ -22,7 +27,7 @@ def emit_log(
     latency_ms: int,
     status: str,
     lead_id: Optional[str] = None,
-    caller_source: str = "unknown",
+    caller_source: Optional[str] = None,
     error_type: Optional[str] = None,
     error_message: Optional[str] = None,
     docs_found: Optional[list] = None,
@@ -32,6 +37,7 @@ def emit_log(
     docs_requested = TOOL_DOCS_MAP.get(tool_name, [])
     docs_found = docs_found or []
     docs_missing = [d for d in docs_requested if d not in docs_found]
+    caller_source = caller_source or _DEFAULT_CALLER
 
     record = {
         "log_type":                   "cc_request_log",
